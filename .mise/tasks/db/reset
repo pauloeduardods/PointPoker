@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Destroy volumes and recreate database"
+set -euo pipefail
+
+docker compose down -v
+docker compose up -d db

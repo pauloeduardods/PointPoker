@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Start PostgreSQL via Docker Compose"
+set -euo pipefail
+
+docker compose up -d db

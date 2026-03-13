@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Install frontend dependencies"
+#MISE dir="frontend"
+set -euo pipefail
+
+npm install

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build backend and frontend"
+#MISE depends=["backend:build", "frontend:build"]
+set -euo pipefail
+
+echo "Build complete."

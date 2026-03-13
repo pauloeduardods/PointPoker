@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run the compiled backend binary"
+#MISE depends=["backend:build"]
+#MISE dir="backend"
+set -euo pipefail
+
+../bin/server

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Start DB, backend, and frontend for local development"
+#MISE depends=["db:start"]
+set -euo pipefail
+
+echo "Starting backend and frontend in parallel..."
+mise run backend:dev &
+BACKEND_PID=$!
+mise run frontend:dev &
+FRONTEND_PID=$!
+trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
+wait

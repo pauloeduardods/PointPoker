@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build frontend for production"
+#MISE dir="frontend"
+set -euo pipefail
+
+npm run build

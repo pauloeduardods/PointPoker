@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Lint backend code"
+#MISE dir="backend"
+set -euo pipefail
+
+if command -v golangci-lint &>/dev/null; then
+  golangci-lint run
+else
+  echo "golangci-lint not installed, running go vet..."
+  go vet ./...
+fi

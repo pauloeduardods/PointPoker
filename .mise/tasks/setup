@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#MISE description="First-time project setup"
+set -euo pipefail
+
+echo "==> Installing tools via mise..."
+mise install
+
+echo "==> Starting database..."
+mise run db:start
+
+echo "==> Waiting for PostgreSQL to be ready..."
+until PGPASSWORD="${DB_PASSWORD:-pointpoker}" psql \
+  -h "${DB_HOST:-localhost}" \
+  -p "${DB_PORT:-5432}" \
+  -U "${DB_USER:-pointpoker}" \
+  -d "${DB_NAME:-pointpoker}" \
+  -c '\q' 2>/dev/null; do
+  sleep 1
+done
+
+echo "==> Running migrations..."
+mise run db:migrate
+
+echo "==> Installing frontend dependencies..."
+mise run frontend:install
+
+echo "==> Building backend..."
+mise run backend:build
+
+echo ""
+echo "Setup complete! Run 'mise run dev' to start developing."

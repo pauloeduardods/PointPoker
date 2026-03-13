@@ -1,0 +1,703 @@
+{
+  "info": {
+    "_postman_id": "pointpoker-api-collection",
+    "name": "PointPoker API",
+    "description": "Coleção completa da API do PointPoker para testar todas as rotas.\n\n## Fluxo de uso:\n1. **Create Room** — cria sala e retorna `session_token` (host)\n2. **Join Room** — entra na sala com outro nome, retorna outro `session_token`\n3. **Get Room** — consulta estado da sala e participantes\n4. **Start Round** — host inicia rodada de votação (requer `X-Session-Token` do host)\n5. **Cast Vote** — participante vota (requer `X-Session-Token` do participante)\n6. **Get Round State** — consulta estado atual da rodada\n7. **Reveal Votes** — host revela os votos\n8. **Reset Round** — host reseta a rodada\n9. **WebSocket** — conexão WS para eventos em tempo real",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "room_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "host_session_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "participant_session_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "round_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "host_participant_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "participant_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "1. Create Room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has room and session_token', function () {",
+                  "    pm.expect(jsonData).to.have.property('room');",
+                  "    pm.expect(jsonData).to.have.property('session_token');",
+                  "    pm.expect(jsonData).to.have.property('participant');",
+                  "});",
+                  "",
+                  "// Save variables for next requests",
+                  "pm.collectionVariables.set('room_code', jsonData.room.code);",
+                  "pm.collectionVariables.set('host_session_token', jsonData.session_token);",
+                  "pm.collectionVariables.set('host_participant_id', jsonData.participant.id);",
+                  "",
+                  "console.log('Room Code:', jsonData.room.code);",
+                  "console.log('Host Token:', jsonData.session_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Sprint 42 Planning\",\n    \"display_name\": \"Paulo (Host)\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms"]
+            },
+            "description": "Cria uma nova sala de Planning Poker. Retorna o código da sala e o session_token do host."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Join Room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has room and session_token', function () {",
+                  "    pm.expect(jsonData).to.have.property('room');",
+                  "    pm.expect(jsonData).to.have.property('session_token');",
+                  "    pm.expect(jsonData).to.have.property('participant');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('participant_session_token', jsonData.session_token);",
+                  "pm.collectionVariables.set('participant_id', jsonData.participant.id);",
+                  "",
+                  "console.log('Participant Token:', jsonData.session_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"display_name\": \"Maria (Dev)\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", "join"]
+            },
+            "description": "Entra em uma sala existente com um nome de exibição. Retorna session_token do participante."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Get Room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has room and participants', function () {",
+                  "    pm.expect(jsonData).to.have.property('room');",
+                  "    pm.expect(jsonData).to.have.property('participants');",
+                  "    pm.expect(jsonData.participants).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Session tokens are not exposed', function () {",
+                  "    jsonData.participants.forEach(function(p) {",
+                  "        pm.expect(p.session_token).to.eql('');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}"]
+            },
+            "description": "Consulta o estado da sala e lista de participantes. Session tokens não são expostos."
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de gerenciamento de salas"
+    },
+    {
+      "name": "Voting",
+      "item": [
+        {
+          "name": "4. Start Round (Host)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has round', function () {",
+                  "    pm.expect(jsonData).to.have.property('round');",
+                  "    pm.expect(jsonData.round).to.have.property('id');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('round_id', jsonData.round.id);",
+                  "console.log('Round ID:', jsonData.round.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Session-Token",
+                "value": "{{host_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"story_title\": \"Implementar endpoint de login OAuth\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", "rounds"]
+            },
+            "description": "Host inicia uma nova rodada de votação com o título da story/task. Requer X-Session-Token do host."
+          },
+          "response": []
+        },
+        {
+          "name": "5a. Cast Vote (Host)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has vote', function () {",
+                  "    pm.expect(jsonData).to.have.property('vote');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Session-Token",
+                "value": "{{host_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"value\": \"5\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "vote"
+              ]
+            },
+            "description": "Host vota na rodada. Valores válidos: 0, 1, 2, 3, 5, 8, 13, 21, ?"
+          },
+          "response": []
+        },
+        {
+          "name": "5b. Cast Vote (Participant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has vote', function () {",
+                  "    pm.expect(jsonData).to.have.property('vote');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Session-Token",
+                "value": "{{participant_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"value\": \"8\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "vote"
+              ]
+            },
+            "description": "Participante vota na rodada. Valores válidos: 0, 1, 2, 3, 5, 8, 13, 21, ?"
+          },
+          "response": []
+        },
+        {
+          "name": "6. Get Round State",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has round and votes', function () {",
+                  "    pm.expect(jsonData).to.have.property('round');",
+                  "    pm.expect(jsonData).to.have.property('votes');",
+                  "});",
+                  "",
+                  "// Before reveal, vote values should be empty",
+                  "if (jsonData.round && jsonData.round.status === 'voting') {",
+                  "    pm.test('Vote values are hidden during voting', function () {",
+                  "        jsonData.votes.forEach(function(v) {",
+                  "            pm.expect(v.value).to.eql('');",
+                  "        });",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/current",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", "rounds", "current"]
+            },
+            "description": "Consulta o estado da rodada atual. Durante votação, os valores dos votos ficam ocultos."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Reveal Votes (Host)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has votes with values', function () {",
+                  "    pm.expect(jsonData).to.have.property('votes');",
+                  "    pm.expect(jsonData.votes).to.be.an('array');",
+                  "    jsonData.votes.forEach(function(v) {",
+                  "        pm.expect(v.value).to.not.eql('');",
+                  "        pm.expect(v).to.have.property('display_name');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Session-Token",
+                "value": "{{host_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/reveal",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "reveal"
+              ]
+            },
+            "description": "Host revela todos os votos da rodada. Após revelar, os valores ficam visíveis."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Reset Round (Host)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Round was reset', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.message).to.eql('round reset');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Session-Token",
+                "value": "{{host_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/reset",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "reset"
+              ]
+            },
+            "description": "Host reseta a rodada — limpa todos os votos e volta ao estado de votação."
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de votação (rounds, votes, reveal, reset)"
+    },
+    {
+      "name": "WebSocket",
+      "item": [
+        {
+          "name": "9. WebSocket Connection (info)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/ws?token={{host_session_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", "ws"],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{host_session_token}}"
+                }
+              ]
+            },
+            "description": "WebSocket endpoint — use o Postman WebSocket tab ou outra ferramenta WS.\n\nURL: ws://localhost:8080/api/rooms/{{room_code}}/ws?token={{session_token}}\n\nEventos recebidos do servidor:\n- `user_joined` — novo participante entrou\n- `user_left` — participante saiu\n- `round_started` — nova rodada iniciada\n- `vote_cast` — alguém votou (sem valor, apenas indicação)\n- `votes_revealed` — votos revelados (com valores)\n- `round_reset` — rodada resetada\n\nFormato das mensagens:\n```json\n{\n  \"type\": \"vote_cast\",\n  \"payload\": {\n    \"participant_id\": \"uuid\",\n    \"display_name\": \"Paulo\",\n    \"has_voted\": true\n  }\n}\n```"
+          },
+          "response": []
+        }
+      ],
+      "description": "Conexão WebSocket para eventos em tempo real. Use a aba WebSocket do Postman."
+    },
+    {
+      "name": "Error Cases",
+      "item": [
+        {
+          "name": "Join non-existent room",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"display_name\": \"Test User\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/INVALID/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "INVALID", "join"]
+            },
+            "description": "Tenta entrar em uma sala que não existe."
+          },
+          "response": []
+        },
+        {
+          "name": "Vote with invalid value",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Session-Token",
+                "value": "{{host_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"value\": \"99\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "vote"
+              ]
+            },
+            "description": "Tenta votar com valor inválido (99 não está no deck Fibonacci)."
+          },
+          "response": []
+        },
+        {
+          "name": "Non-host tries to reveal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 403', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Session-Token",
+                "value": "{{participant_session_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/reveal",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "reveal"
+              ]
+            },
+            "description": "Participante (não-host) tenta revelar votos — deve retornar 403 Forbidden."
+          },
+          "response": []
+        },
+        {
+          "name": "Missing session token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 401 or 403', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([401, 403]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"value\": \"5\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/rounds/{{round_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "rooms",
+                "{{room_code}}",
+                "rounds",
+                "{{round_id}}",
+                "vote"
+              ]
+            },
+            "description": "Tenta votar sem enviar X-Session-Token — deve retornar 401."
+          },
+          "response": []
+        }
+      ],
+      "description": "Casos de erro para validar tratamento de exceções"
+    }
+  ]
+}

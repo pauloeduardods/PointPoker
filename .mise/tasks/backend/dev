@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Run the Go backend with live reload (requires air)"
+#MISE dir="backend"
+#MISE depends=["db:start"]
+set -euo pipefail
+
+if command -v air &>/dev/null; then
+  air
+else
+  echo "air not found, running without live reload..."
+  go run ./cmd/server
+fi

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run backend tests"
+#MISE dir="backend"
+set -euo pipefail
+
+go test ./...

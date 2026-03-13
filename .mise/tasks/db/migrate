@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Run SQL migrations against the database"
+set -euo pipefail
+
+PGPASSWORD="${DB_PASSWORD:-pointpoker}" psql \
+  -h "${DB_HOST:-localhost}" \
+  -p "${DB_PORT:-5432}" \
+  -U "${DB_USER:-pointpoker}" \
+  -d "${DB_NAME:-pointpoker}" \
+  -f backend/migrations/001_init.sql

@@ -1,0 +1,10 @@
+[tools]
+go = "1.26"
+node = "22"
+
+[env]
+_.file = ".env"
+
+[task_config]
+dir = "{{config_root}}"
+

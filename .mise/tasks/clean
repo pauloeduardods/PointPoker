@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Remove build artifacts and Docker volumes"
+set -euo pipefail
+
+rm -rf bin/
+rm -rf frontend/dist/
+docker compose down -v 2>/dev/null || true
+echo "Clean complete."
