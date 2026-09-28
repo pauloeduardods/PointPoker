@@ -1,214 +1,265 @@
 <template>
   <div
-    class="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4"
+    class="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-600 via-indigo-500 to-violet-600 p-4"
   >
-    <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
-      <h1 class="text-4xl font-bold text-center mb-2 text-gray-800">
-        Point Poker
-      </h1>
-      <p class="text-center text-gray-600 mb-8">Agile estimation made easy</p>
+    <main class="w-full max-w-md">
+      <div class="mb-6 text-center text-white">
+        <div
+          class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-2xl font-bold shadow-lg ring-1 ring-white/30"
+          aria-hidden="true"
+        >
+          5
+        </div>
+        <h1 class="text-3xl font-bold tracking-tight">Point Poker</h1>
+        <p class="mt-1 text-indigo-100">Real-time estimation for agile teams</p>
+      </div>
 
-      <div class="space-y-4">
-        <!-- Create Room Tab -->
-        <div v-if="activeTab === 'create'" class="space-y-4">
-          <h2 class="text-2xl font-semibold text-gray-800">Create Room</h2>
+      <div class="rounded-2xl bg-white p-6 shadow-2xl sm:p-8">
+        <div
+          class="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1"
+          role="tablist"
+          aria-label="Create or join a room"
+        >
+          <button
+            v-for="tab in tabs"
+            :id="`tab-${tab.id}`"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === tab.id"
+            :aria-controls="`panel-${tab.id}`"
+            :data-testid="`tab-${tab.id}`"
+            class="rounded-md px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            :class="
+              activeTab === tab.id
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            "
+            @click="selectTab(tab.id)"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
 
+        <p
+          v-if="invitedCode && activeTab === 'join'"
+          class="mb-4 rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800"
+          data-testid="invite-hint"
+        >
+          You've been invited to room
+          <strong class="font-mono">{{ invitedCode }}</strong>. Enter your name to join.
+        </p>
+
+        <form
+          v-if="activeTab === 'create'"
+          id="panel-create"
+          role="tabpanel"
+          aria-labelledby="tab-create"
+          class="space-y-4"
+          data-testid="create-form"
+          @submit.prevent="handleCreate"
+        >
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2"
-              >Room Name</label
-            >
+            <label for="create-room-name" class="label">Room name</label>
             <input
+              id="create-room-name"
               v-model="createForm.roomName"
               type="text"
-              placeholder="e.g., Sprint Planning"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              @keyup.enter="handleCreateRoom"
+              class="input"
+              placeholder="e.g. Sprint 42 planning"
+              maxlength="100"
+              autocomplete="off"
+              required
             />
           </div>
-
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2"
-              >Your Name</label
-            >
+            <label for="create-display-name" class="label">Your name</label>
             <input
+              id="create-display-name"
               v-model="createForm.displayName"
               type="text"
-              placeholder="e.g., John Doe"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              @keyup.enter="handleCreateRoom"
+              class="input"
+              placeholder="e.g. Ada Lovelace"
+              maxlength="50"
+              autocomplete="nickname"
+              required
             />
           </div>
-
           <button
-            @click="handleCreateRoom"
-            :disabled="
-              !createForm.roomName || !createForm.displayName || loading
-            "
-            class="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition"
+            type="submit"
+            class="btn-primary w-full py-2.5"
+            :disabled="!canCreate || busy"
           >
-            <span v-if="loading">Creating...</span>
-            <span v-else>Create Room</span>
+            {{ busy ? "Creating…" : "Create room" }}
           </button>
+        </form>
 
-          <div
-            class="text-center text-sm text-gray-600 pt-4 border-t border-gray-200"
-          >
-            <button
-              @click="activeTab = 'join'"
-              class="text-blue-500 hover:text-blue-700 font-semibold"
-            >
-              Join existing room?
-            </button>
-          </div>
-        </div>
-
-        <!-- Join Room Tab -->
-        <div v-if="activeTab === 'join'" class="space-y-4">
-          <h2 class="text-2xl font-semibold text-gray-800">Join Room</h2>
-
+        <form
+          v-else
+          id="panel-join"
+          role="tabpanel"
+          aria-labelledby="tab-join"
+          class="space-y-4"
+          data-testid="join-form"
+          @submit.prevent="handleJoin"
+        >
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2"
-              >Room Code</label
-            >
+            <label for="join-room-code" class="label">Room code</label>
             <input
+              id="join-room-code"
               v-model="joinForm.roomCode"
               type="text"
-              placeholder="e.g., ABC123"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
-              @keyup.enter="handleJoinRoom"
+              class="input font-mono uppercase tracking-widest"
+              placeholder="ABC123"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              required
             />
           </div>
-
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2"
-              >Your Name</label
-            >
+            <label for="join-display-name" class="label">Your name</label>
             <input
+              id="join-display-name"
+              ref="joinNameInput"
               v-model="joinForm.displayName"
               type="text"
-              placeholder="e.g., John Doe"
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              @keyup.enter="handleJoinRoom"
+              class="input"
+              placeholder="e.g. Grace Hopper"
+              maxlength="50"
+              autocomplete="nickname"
+              required
             />
           </div>
-
           <button
-            @click="handleJoinRoom"
-            :disabled="!joinForm.roomCode || !joinForm.displayName || loading"
-            class="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition"
+            type="submit"
+            class="btn-primary w-full py-2.5"
+            :disabled="!canJoin || busy"
           >
-            <span v-if="loading">Joining...</span>
-            <span v-else>Join Room</span>
+            {{ busy ? "Joining…" : "Join room" }}
           </button>
+        </form>
 
-          <div
-            class="text-center text-sm text-gray-600 pt-4 border-t border-gray-200"
+        <p
+          v-if="error"
+          role="alert"
+          class="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          {{ error }}
+        </p>
+
+        <div
+          v-if="resumeCode"
+          class="mt-6 border-t border-slate-200 pt-4 text-center text-sm text-slate-600"
+        >
+          <router-link
+            :to="{ name: 'room', params: { code: resumeCode } }"
+            class="font-semibold text-indigo-600 hover:text-indigo-800 focus:outline-none focus-visible:underline"
+            data-testid="resume-link"
           >
-            <button
-              @click="activeTab = 'create'"
-              class="text-blue-500 hover:text-blue-700 font-semibold"
-            >
-              Create new room?
-            </button>
-          </div>
+            Return to room {{ resumeCode }} →
+          </router-link>
         </div>
       </div>
-
-      <!-- Error Message -->
-      <div
-        v-if="error"
-        class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg"
-      >
-        <p class="text-red-700 text-sm">{{ error }}</p>
-      </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { useRouter } from "vue-router";
-import { useAppStore } from "../stores/app";
+import { computed, nextTick, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { roomAPI } from "../api/rooms";
+import { friendlyError } from "../api/client";
+import type { SessionResponse } from "../api/types";
+import { useAppStore } from "../stores/app";
+import { loadSession, normalizeRoomCode } from "../utils/session";
 
+type Tab = "create" | "join";
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: "create", label: "Create room" },
+  { id: "join", label: "Join room" },
+];
+
+const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
 
-const activeTab = ref<"create" | "join">("create");
-const loading = ref(false);
+const activeTab = ref<Tab>("create");
+const busy = ref(false);
 const error = ref<string | null>(null);
+const joinNameInput = ref<HTMLInputElement | null>(null);
 
-const createForm = ref({
-  roomName: "",
-  displayName: "",
+const createForm = reactive({ roomName: "", displayName: "" });
+const joinForm = reactive({ roomCode: "", displayName: "" });
+
+const invitedCode = ref<string | null>(null);
+const resumeCode = computed(() => {
+  const s = store.session ?? loadSession();
+  return s && s.roomCode !== invitedCode.value ? s.roomCode : null;
 });
 
-const joinForm = ref({
-  roomCode: "",
-  displayName: "",
-});
+const canCreate = computed(
+  () => createForm.roomName.trim() !== "" && createForm.displayName.trim() !== "",
+);
+const canJoin = computed(
+  () => joinForm.roomCode.trim() !== "" && joinForm.displayName.trim() !== "",
+);
 
-async function handleCreateRoom() {
-  if (!createForm.value.roomName || !createForm.value.displayName) {
-    error.value = "Please fill in all fields";
-    return;
-  }
+watch(
+  () => route.query.join,
+  (value) => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw === "string" && raw.trim() !== "") {
+      const code = normalizeRoomCode(raw);
+      invitedCode.value = code;
+      joinForm.roomCode = code;
+      activeTab.value = "join";
+      void nextTick(() => joinNameInput.value?.focus());
+    }
+  },
+  { immediate: true },
+);
 
-  loading.value = true;
+function selectTab(tab: Tab) {
+  activeTab.value = tab;
   error.value = null;
+}
 
+async function enter(request: () => Promise<SessionResponse>) {
+  busy.value = true;
+  error.value = null;
   try {
-    console.log("Creating room:", createForm.value);
-    const response = await roomAPI.createRoom(
-      createForm.value.roomName,
-      createForm.value.displayName,
-    );
-    console.log("Room created:", response.data);
-
-    store.setRoom(response.data.room);
-    store.setParticipant(response.data.participant);
-    store.setSessionToken(response.data.session_token);
-
-    console.log("Navigating to room:", response.data.room.code);
-    router.push(`/room/${response.data.room.code}`);
-  } catch (err: any) {
-    console.error("Error creating room:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to create room";
+    const res = await request();
+    store.startSession(res);
+    await router.push({ name: "room", params: { code: res.room.code } });
+  } catch (err) {
+    error.value = friendlyError(err);
   } finally {
-    loading.value = false;
+    busy.value = false;
   }
 }
 
-async function handleJoinRoom() {
-  if (!joinForm.value.roomCode || !joinForm.value.displayName) {
-    error.value = "Please fill in all fields";
+function handleCreate() {
+  if (!canCreate.value) {
+    error.value = "Please fill in all fields.";
     return;
   }
+  return enter(() =>
+    roomAPI.createRoom(createForm.roomName.trim(), createForm.displayName.trim()),
+  );
+}
 
-  loading.value = true;
-  error.value = null;
-
-  try {
-    console.log("Joining room:", joinForm.value.roomCode);
-    const response = await roomAPI.joinRoom(
-      joinForm.value.roomCode.toUpperCase(),
-      joinForm.value.displayName,
-    );
-    console.log("Room joined:", response.data);
-
-    store.setRoom(response.data.room);
-    store.setParticipant(response.data.participant);
-    store.setSessionToken(response.data.session_token);
-
-    console.log("Navigating to room:", response.data.room.code);
-    router.push(`/room/${response.data.room.code}`);
-  } catch (err: any) {
-    console.error("Error joining room:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to join room";
-  } finally {
-    loading.value = false;
+function handleJoin() {
+  if (!canJoin.value) {
+    error.value = "Please fill in all fields.";
+    return;
   }
+  return enter(() =>
+    roomAPI.joinRoom(
+      normalizeRoomCode(joinForm.roomCode),
+      joinForm.displayName.trim(),
+    ),
+  );
 }
 </script>

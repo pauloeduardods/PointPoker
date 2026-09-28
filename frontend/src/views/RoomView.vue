@@ -1,257 +1,234 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <!-- Header -->
-    <header class="bg-white shadow sticky top-0 z-10">
+  <div class="min-h-screen bg-slate-50">
+    <header class="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div
-        class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center"
+        class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6"
       >
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">Point Poker</h1>
-          <p class="text-sm text-gray-600">Room: {{ store.roomCode }}</p>
+        <div class="min-w-0">
+          <router-link
+            to="/"
+            class="text-xs font-semibold uppercase tracking-wide text-indigo-600 hover:text-indigo-800 focus:outline-none focus-visible:underline"
+          >
+            Point Poker
+          </router-link>
+          <h1 class="truncate text-lg font-bold text-slate-900 sm:text-xl" data-testid="room-name">
+            {{ store.room?.name ?? "Loading room…" }}
+          </h1>
+          <div class="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+            <span>
+              Code
+              <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-semibold tracking-widest text-slate-800" data-testid="room-code">{{ code }}</span>
+            </span>
+            <button
+              type="button"
+              class="rounded px-1.5 py-0.5 font-medium text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              data-testid="copy-link"
+              @click="copyInvite"
+            >
+              {{ copyLabel }}
+            </button>
+            <span class="sr-only" role="status" aria-live="polite">{{ copyStatus }}</span>
+          </div>
         </div>
-        <button
-          @click="handleLeaveRoom"
-          class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition"
-        >
-          Leave
-        </button>
+
+        <div class="flex items-center gap-3">
+          <span
+            class="inline-flex items-center gap-1.5 text-xs font-medium"
+            :class="store.wsConnected ? 'text-emerald-700' : 'text-amber-700'"
+            data-testid="connection-status"
+            role="status"
+          >
+            <span
+              class="h-2 w-2 rounded-full"
+              :class="store.wsConnected ? 'bg-emerald-500' : 'animate-pulse bg-amber-500'"
+              aria-hidden="true"
+            />
+            {{ store.wsConnected ? "Live" : "Reconnecting…" }}
+          </span>
+          <button
+            type="button"
+            class="btn-danger"
+            :disabled="busy === 'leave'"
+            data-testid="leave"
+            @click="leave"
+          >
+            {{ busy === "leave" ? "Leaving…" : "Leave" }}
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Main Area -->
-        <div class="lg:col-span-2">
-          <!-- Round Section -->
-          <div class="bg-white rounded-lg shadow p-6 mb-8">
-            <div v-if="!store.currentRound" class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-800 mb-4">
-                No active round
-              </h2>
-              <p class="text-gray-600 mb-6">
-                Start a new round to begin voting
-              </p>
+    <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <div v-if="phase === 'loading'" class="py-24 text-center text-slate-500" role="status">
+        Loading room…
+      </div>
 
-              <div v-if="store.isHost" class="space-y-4 max-w-md mx-auto">
-                <input
-                  v-model="newRoundTitle"
-                  type="text"
-                  placeholder="Enter story title (e.g., User login form)"
-                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  @keyup.enter="handleStartRound"
-                />
-                <button
-                  @click="handleStartRound"
-                  :disabled="!newRoundTitle || loading"
-                  class="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition"
-                >
-                  <span v-if="loading">Starting...</span>
-                  <span v-else>Start Round</span>
-                </button>
-              </div>
-              <p v-else class="text-gray-500 text-sm">
-                Waiting for host to start a round...
-              </p>
-            </div>
+      <div v-else-if="phase === 'error'" class="card mx-auto max-w-md text-center" role="alert">
+        <p class="mb-4 text-slate-700">{{ loadError }}</p>
+        <div class="flex justify-center gap-2">
+          <button type="button" class="btn-primary" @click="init">Try again</button>
+          <router-link to="/" class="btn-secondary">Back home</router-link>
+        </div>
+      </div>
 
-            <div v-else>
-              <!-- Round Info -->
-              <div class="mb-6">
-                <h2 class="text-2xl font-bold text-gray-900">
-                  {{ store.currentRound.story_title }}
+      <div v-else class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div class="space-y-6 lg:col-span-2">
+          <p
+            v-if="actionError"
+            role="alert"
+            class="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            data-testid="action-error"
+          >
+            <span>{{ actionError }}</span>
+            <button
+              type="button"
+              class="rounded text-red-500 hover:text-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              aria-label="Dismiss error"
+              @click="actionError = null"
+            >
+              <span aria-hidden="true">✕</span>
+            </button>
+          </p>
+
+          <section class="card" aria-labelledby="round-heading">
+            <template v-if="!round">
+              <div class="py-6 text-center">
+                <h2 id="round-heading" class="text-lg font-semibold text-slate-900">
+                  No active round
                 </h2>
-                <div class="mt-2 flex items-center space-x-4">
-                  <span
-                    :class="[
-                      'px-3 py-1 rounded-full text-sm font-semibold',
-                      store.currentRound.status === 'voting'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-green-100 text-green-800',
-                    ]"
-                  >
-                    {{
-                      store.currentRound.status === "voting"
-                        ? "🎯 Voting"
-                        : "✓ Revealed"
-                    }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Voting Cards -->
-              <div v-if="store.currentRound.status === 'voting'" class="mb-6">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">
-                  Cast Your Vote
-                </h3>
-                <div class="grid grid-cols-3 sm:grid-cols-5 gap-3">
-                  <button
-                    v-for="value in fibonacciDeck"
-                    :key="value"
-                    @click="handleVote(value)"
-                    :class="[
-                      'py-4 px-2 rounded-lg font-bold text-lg transition',
-                      store.currentParticipant?.id &&
-                      store.votesByParticipant[store.currentParticipant.id]
-                        ?.value === value
-                        ? 'bg-blue-500 text-white ring-4 ring-blue-300'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
-                    ]"
-                  >
-                    {{ value }}
-                  </button>
-                </div>
-                <p v-if="store.hasVoted" class="text-sm text-green-600 mt-3">
-                  ✓ Your vote has been recorded
+                <p v-if="!store.isHost" class="mt-2 text-sm text-slate-500" data-testid="waiting-host">
+                  Waiting for the host to start a round…
+                </p>
+                <p v-else class="mt-2 text-sm text-slate-500">
+                  Enter a story to start estimating.
                 </p>
               </div>
+            </template>
 
-              <!-- Vote Results -->
-              <div v-if="store.currentRound.status === 'revealed'" class="mb-6">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">
-                  Results
-                </h3>
-                <div class="space-y-3">
-                  <div
-                    v-for="(count, value) in store.roundStats.voteValues"
-                    :key="value"
-                    class="flex items-center"
-                  >
-                    <div class="w-16">
-                      <span class="text-lg font-bold text-blue-600">{{
-                        value
-                      }}</span>
-                    </div>
-                    <div class="flex-1">
-                      <div
-                        class="bg-gray-200 rounded-full h-8 flex items-center"
-                      >
-                        <div
-                          :style="{
-                            width: `${(count / store.roundStats.totalVotes) * 100}%`,
-                          }"
-                          class="bg-blue-500 h-8 rounded-full transition-all duration-300 flex items-center justify-center"
-                        >
-                          <span
-                            v-if="
-                              (count / store.roundStats.totalVotes) * 100 > 15
-                            "
-                            class="text-white text-sm font-semibold"
-                          >
-                            {{ count }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="w-12 text-right">
-                      <span class="text-gray-700"
-                        >{{ count }}/{{
-                          store.roundStats.totalParticipants
-                        }}</span
-                      >
-                    </div>
-                  </div>
+            <template v-else>
+              <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Current story
+                  </p>
+                  <h2 id="round-heading" class="break-words text-xl font-bold text-slate-900" data-testid="story-title">
+                    {{ round.story_title }}
+                  </h2>
                 </div>
-
-                <!-- Actions -->
-                <div v-if="store.isHost" class="mt-6 space-y-2">
-                  <button
-                    @click="handleResetRound"
-                    :disabled="loading"
-                    class="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition"
-                  >
-                    <span v-if="loading">Resetting...</span>
-                    <span v-else>Start New Round</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Host Controls -->
-              <div
-                v-if="store.isHost && store.currentRound.status === 'voting'"
-                class="mt-6 pt-6 border-t border-gray-200"
-              >
-                <button
-                  @click="handleRevealVotes"
-                  :disabled="store.roundStats.totalVotes === 0 || loading"
-                  class="w-full bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition"
+                <span
+                  class="rounded-full px-3 py-1 text-xs font-semibold"
+                  :class="
+                    round.status === 'voting'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                  "
+                  data-testid="round-status"
                 >
-                  <span v-if="loading">Revealing...</span>
-                  <span v-else
-                    >Reveal Votes ({{ store.roundStats.totalVotes }}/{{
-                      store.roundStats.totalParticipants
-                    }})</span
-                  >
-                </button>
+                  {{ round.status === "voting" ? "Voting" : "Revealed" }}
+                </span>
               </div>
-            </div>
-          </div>
 
-          <!-- Error Message -->
-          <div
-            v-if="error"
-            class="bg-red-50 border border-red-200 rounded-lg p-4 mb-8"
+              <template v-if="round.status === 'voting'">
+                <VotingDeck :selected="store.myVote" @vote="onVote" />
+                <p class="mt-4 text-sm text-slate-600" aria-live="polite" data-testid="vote-hint">
+                  <template v-if="store.myVote">
+                    Your vote: <strong>{{ store.myVote }}</strong> — pick another card to change it.
+                  </template>
+                  <template v-else>Choose a card. Votes stay hidden until the host reveals them.</template>
+                </p>
+              </template>
+
+              <RoundResults
+                v-else-if="store.results"
+                :results="store.results"
+                :votes="store.votes"
+                :participants="store.participants"
+              />
+            </template>
+          </section>
+
+          <section
+            v-if="store.isHost"
+            class="card"
+            aria-labelledby="host-heading"
+            data-testid="host-controls"
           >
-            <p class="text-red-700">{{ error }}</p>
-          </div>
+            <h2 id="host-heading" class="mb-4 text-base font-semibold text-slate-900">Host controls</h2>
+
+            <div v-if="round" class="mb-4 flex flex-wrap gap-2">
+              <button
+                v-if="round.status === 'voting'"
+                type="button"
+                class="btn-primary"
+                :disabled="busy !== null"
+                data-testid="reveal"
+                @click="reveal"
+              >
+                {{ busy === "reveal" ? "Revealing…" : "Reveal cards" }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="btn-secondary"
+                :disabled="busy !== null"
+                data-testid="revote"
+                @click="revote"
+              >
+                {{ busy === "revote" ? "Resetting…" : "Revote" }}
+              </button>
+              <button
+                v-if="round.status === 'voting' && !showNextForm"
+                type="button"
+                class="btn-secondary"
+                data-testid="skip-story"
+                @click="openNextForm"
+              >
+                Next story
+              </button>
+            </div>
+
+            <form
+              v-if="nextFormVisible"
+              class="flex flex-col gap-2 sm:flex-row sm:items-end"
+              data-testid="next-story-form"
+              @submit.prevent="startRound"
+            >
+              <div class="flex-1">
+                <label for="story-title" class="label">
+                  {{ round ? "Next story" : "First story" }}
+                </label>
+                <input
+                  id="story-title"
+                  ref="storyInput"
+                  v-model="storyTitle"
+                  type="text"
+                  class="input"
+                  placeholder="e.g. User can reset their password"
+                  maxlength="200"
+                  autocomplete="off"
+                />
+              </div>
+              <button
+                type="submit"
+                class="btn-primary"
+                :disabled="storyTitle.trim() === '' || busy !== null"
+                data-testid="start-round"
+              >
+                {{ busy === "start" ? "Starting…" : "Start round" }}
+              </button>
+            </form>
+          </section>
         </div>
 
-        <!-- Sidebar -->
-        <aside class="space-y-6">
-          <!-- Participants -->
-          <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">
-              Participants ({{ store.participants.length }})
-            </h3>
-            <div class="space-y-2">
-              <div
-                v-for="participant in store.participants"
-                :key="participant.id"
-                :class="[
-                  'p-3 rounded-lg flex items-center justify-between',
-                  participant.id === store.currentParticipant?.id
-                    ? 'bg-blue-50 border border-blue-200'
-                    : 'bg-gray-50',
-                ]"
-              >
-                <div>
-                  <p class="font-semibold text-gray-900">
-                    {{ participant.display_name }}
-                  </p>
-                  <p class="text-xs text-gray-600">
-                    {{ participant.is_host ? "Host" : "Guest" }}
-                  </p>
-                </div>
-                <div v-if="store.currentRound" class="text-right">
-                  <div v-if="store.votesByParticipant[participant.id]">
-                    <span
-                      v-if="store.currentRound.status === 'voting'"
-                      class="text-sm font-semibold text-green-600"
-                    >
-                      ✓ Voted
-                    </span>
-                    <span v-else class="text-lg font-bold text-blue-600">
-                      {{ store?.votesByParticipant[participant.id]?.value }}
-                    </span>
-                  </div>
-                  <span v-else class="text-sm text-gray-500">Waiting...</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Connection Status -->
-          <div
-            :class="[
-              'rounded-lg p-4 text-sm font-semibold',
-              store.wsConnected
-                ? 'bg-green-50 text-green-700 border border-green-200'
-                : 'bg-red-50 text-red-700 border border-red-200',
-            ]"
-          >
-            <span v-if="store.wsConnected">🟢 Connected</span>
-            <span v-else>🔴 Disconnected</span>
-          </div>
+        <aside>
+          <ParticipantList
+            :participants="store.participants"
+            :my-id="store.myId"
+            :online-ids="store.onlineIds"
+            :voted-ids="store.votedIds"
+            :voted-count="store.votedCount"
+            :show-votes="round?.status === 'voting'"
+          />
         </aside>
       </div>
     </main>
@@ -259,208 +236,148 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
-import { useRouter, useRoute } from "vue-router";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import ParticipantList from "../components/ParticipantList.vue";
+import RoundResults from "../components/RoundResults.vue";
+import VotingDeck from "../components/VotingDeck.vue";
+import { errorStatus, friendlyError } from "../api/client";
+import { useRoomSync } from "../composables/useRoomSync";
 import { useAppStore } from "../stores/app";
-import { roomAPI } from "../api/rooms";
-import { votingAPI, FIBONACCI_DECK } from "../api/voting";
-import { WebSocketManager } from "../api/websocket";
+import { copyText, inviteLink } from "../utils/clipboard";
+import { normalizeRoomCode } from "../utils/session";
 
-const router = useRouter();
+type Busy = "reveal" | "revote" | "start" | "leave" | null;
+
 const route = useRoute();
+const router = useRouter();
 const store = useAppStore();
+const sync = useRoomSync();
 
-const loading = ref(false);
-const error = ref<string | null>(null);
-const newRoundTitle = ref("");
-const fibonacciDeck = FIBONACCI_DECK;
-
-let wsManager: WebSocketManager | null = null;
-let pollInterval: number | null = null;
-
-onMounted(async () => {
-  const roomCode = route.params.code as string;
-  console.log("RoomView mounted. Room code:", roomCode);
-  console.log("API URL:", import.meta.env.VITE_API_URL);
-  console.log("Session token:", store.sessionToken ? "OK" : "MISSING");
-
-  // Load room and participants
-  try {
-    const response = await roomAPI.getRoom(roomCode);
-    console.log("Room loaded:", response.data);
-    store.setRoom(response.data.room);
-    store.setParticipants(response.data.participants);
-  } catch (err: any) {
-    console.error("Failed to load room:", err);
-    error.value = "Failed to load room";
-    setTimeout(() => router.push("/"), 2000);
-    return;
-  }
-
-  // Fetch initial round state
-  await fetchRoundState();
-
-  // Connect WebSocket if we have a session token
-  if (store.sessionToken) {
-    wsManager = new WebSocketManager(roomCode, store.sessionToken);
-    try {
-      await wsManager.connect();
-      console.log("WebSocket connected");
-    } catch (err) {
-      console.error("Failed to connect WebSocket:", err);
-    }
-  }
-
-  // Set up polling to refresh room data every 3 seconds
-  pollInterval = window.setInterval(async () => {
-    try {
-      // Refresh participants
-      const response = await roomAPI.getRoom(roomCode);
-      store.setParticipants(response.data.participants);
-
-      // Refresh round state
-      await fetchRoundState();
-    } catch (err) {
-      console.error("Polling error:", err);
-    }
-  }, 3000);
+const code = computed(() => {
+  const raw = route.params.code;
+  return normalizeRoomCode(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""));
 });
+const round = computed(() => store.round);
 
-onUnmounted(() => {
-  if (wsManager) {
-    wsManager.disconnect();
-  }
-  if (pollInterval) {
-    clearInterval(pollInterval);
-  }
-});
+const phase = ref<"loading" | "ready" | "error">("loading");
+const loadError = ref<string | null>(null);
+const actionError = ref<string | null>(null);
+const busy = ref<Busy>(null);
+const storyTitle = ref("");
+const showNextForm = ref(false);
+const storyInput = ref<HTMLInputElement | null>(null);
+const copyLabel = ref("Copy invite link");
+const copyStatus = ref("");
 
-async function handleStartRound() {
-  if (!newRoundTitle.value) {
-    error.value = "Please enter a story title";
-    return;
-  }
+const nextFormVisible = computed(
+  () => !round.value || round.value.status === "revealed" || showNextForm.value,
+);
 
-  loading.value = true;
-  error.value = null;
+async function redirectToJoin() {
+  sync.stop();
+  await router.replace({ name: "home", query: { join: code.value } });
+}
 
+async function init() {
+  phase.value = "loading";
+  loadError.value = null;
+  sync.stop();
   try {
-    console.log("Starting round with title:", newRoundTitle.value);
-    const response = await votingAPI.startRound(
-      store.roomCode,
-      newRoundTitle.value,
-    );
-    console.log("Round started:", response.data);
-
-    // Immediately set the round so UI updates
-    store.setCurrentRound(response.data.round);
-    store.setVotes([]); // Clear votes for new round
-    newRoundTitle.value = "";
-
-    // Small delay to ensure UI updates
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    // Then fetch the actual state
-    try {
-      await fetchRoundState();
-      console.log("Round state fetched successfully");
-    } catch (fetchErr) {
-      console.error(
-        "Failed to fetch round state, but UI should be updated:",
-        fetchErr,
-      );
+    const result = await store.restoreSession(code.value);
+    if (result === "invalid") {
+      await redirectToJoin();
+      return;
     }
-  } catch (err: any) {
-    console.error("Error starting round:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to start round";
-  } finally {
-    loading.value = false;
+    await store.refreshAll();
+    phase.value = "ready";
+    const token = store.sessionToken;
+    if (token) sync.start(code.value, token);
+  } catch (err) {
+    loadError.value = friendlyError(err, "We couldn't load this room.");
+    phase.value = "error";
   }
 }
 
-async function handleVote(value: string) {
-  if (!store.currentRound) return;
-
-  loading.value = true;
-  error.value = null;
-
-  try {
-    console.log("Casting vote:", value);
-    await votingAPI.castVote(store.roomCode, store.currentRound.id, value);
-    console.log("Vote cast successfully");
-
-    // Fetch updated votes
-    await fetchRoundState();
-  } catch (err: any) {
-    console.error("Error casting vote:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to cast vote";
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function handleRevealVotes() {
-  if (!store.currentRound) return;
-
-  loading.value = true;
-  error.value = null;
-
-  try {
-    console.log("Revealing votes for round:", store.currentRound.id);
-    await votingAPI.revealVotes(store.roomCode, store.currentRound.id);
-    console.log("Votes revealed successfully");
-
-    // Fetch updated round state
-    await fetchRoundState();
-  } catch (err: any) {
-    console.error("Error revealing votes:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to reveal votes";
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function handleResetRound() {
-  if (!store.currentRound) return;
-
-  loading.value = true;
-  error.value = null;
-
-  try {
-    console.log("Resetting round:", store.currentRound.id);
-    await votingAPI.resetRound(store.roomCode, store.currentRound.id);
-    store.setCurrentRound(null);
-    store.setVotes([]);
-    console.log("Round reset successfully");
-  } catch (err: any) {
-    console.error("Error resetting round:", err);
-    error.value =
-      err.response?.data?.error || err.message || "Failed to reset round";
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function fetchRoundState() {
-  try {
-    console.log("Fetching round state for room:", store.roomCode);
-    const response = await votingAPI.getRoundState(store.roomCode);
-    console.log("Round state:", response.data);
-    store.setCurrentRound(response.data.round);
-    store.setVotes(response.data.votes || []);
-  } catch (err: any) {
-    console.error("Failed to fetch round state:", err);
-    error.value = err.response?.data?.error || "Failed to fetch round state";
-  }
-}
-
-function handleLeaveRoom() {
-  if (confirm("Are you sure you want to leave this room?")) {
+async function handleActionError(err: unknown) {
+  const status = errorStatus(err);
+  if (status === 401) {
     store.clearSession();
-    router.push("/");
+    await redirectToJoin();
+    return;
+  }
+  actionError.value = friendlyError(err);
+  if (status === 409 || status === 403) {
+    store.refreshAll().catch(() => undefined);
   }
 }
+
+async function runAction(kind: Exclude<Busy, null>, action: () => Promise<void>) {
+  busy.value = kind;
+  actionError.value = null;
+  try {
+    await action();
+  } catch (err) {
+    await handleActionError(err);
+  } finally {
+    busy.value = null;
+  }
+}
+
+function onVote(value: string) {
+  actionError.value = null;
+  store.castVote(value).catch(handleActionError);
+}
+
+function reveal() {
+  return runAction("reveal", () => store.revealVotes());
+}
+
+function revote() {
+  return runAction("revote", () => store.revote());
+}
+
+function startRound() {
+  const title = storyTitle.value.trim();
+  if (!title) return;
+  return runAction("start", async () => {
+    await store.startRound(title);
+    storyTitle.value = "";
+    showNextForm.value = false;
+  });
+}
+
+function openNextForm() {
+  showNextForm.value = true;
+  void nextTick(() => storyInput.value?.focus());
+}
+
+async function leave() {
+  if (!window.confirm("Leave this room? You can rejoin later with the room code.")) return;
+  busy.value = "leave";
+  sync.stop();
+  await store.leaveRoom();
+  busy.value = null;
+  await router.push({ name: "home" });
+}
+
+let copyTimer: ReturnType<typeof setTimeout> | null = null;
+async function copyInvite() {
+  const ok = await copyText(inviteLink(code.value));
+  copyLabel.value = ok ? "Link copied!" : "Copy failed";
+  copyStatus.value = ok ? "Invite link copied to clipboard" : "Could not copy the invite link";
+  if (copyTimer) clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
+    copyLabel.value = "Copy invite link";
+    copyStatus.value = "";
+  }, 2000);
+}
+
+onMounted(init);
+onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer);
+});
+watch(code, (next, prev) => {
+  if (next && next !== prev && route.name === "room") void init();
+});
 </script>
