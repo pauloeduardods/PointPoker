@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the full stack in Docker (db + backend + nginx frontend)"
+set -euo pipefail
+
+docker compose --profile app up --build -d --wait
+echo "Point Poker is running at http://localhost:${FRONTEND_PORT:-8000}"

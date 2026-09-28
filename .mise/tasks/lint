@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Lint backend and frontend"
+#MISE depends=["backend:lint", "frontend:lint"]
+set -euo pipefail
