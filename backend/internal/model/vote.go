@@ -1,10 +1,14 @@
 package model
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // RoundStatus represents the current state of a voting round.
 type RoundStatus string
 
+// Round statuses.
 const (
 	RoundStatusVoting   RoundStatus = "voting"
 	RoundStatusRevealed RoundStatus = "revealed"
@@ -28,5 +32,18 @@ type Vote struct {
 	VotedAt       time.Time `json:"voted_at"`
 }
 
+// RevealedVote is a vote joined with its participant's display name, as
+// returned when a round is revealed.
+type RevealedVote struct {
+	ParticipantID string `json:"participant_id"`
+	DisplayName   string `json:"display_name"`
+	Value         string `json:"value"`
+}
+
 // FibonacciDeck contains the allowed vote values.
-var FibonacciDeck = []string{"0", "1", "2", "3", "5", "8", "13", "21", "?"}
+var FibonacciDeck = []string{"0", "1", "2", "3", "5", "8", "13", "21", "?", "☕"}
+
+// IsValidVote reports whether value is a card of the FibonacciDeck.
+func IsValidVote(value string) bool {
+	return slices.Contains(FibonacciDeck, value)
+}

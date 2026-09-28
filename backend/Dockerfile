@@ -15,8 +15,9 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 
 COPY --from=builder /server .
-COPY --from=builder /app/migrations ./migrations
 
-EXPOSE 3000
+ENV GIN_MODE=release
+
+EXPOSE 8080
 
 CMD ["./server"]

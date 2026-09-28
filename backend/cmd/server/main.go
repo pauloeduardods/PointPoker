@@ -1,13 +1,18 @@
+// Command server runs the PointPoker HTTP/WebSocket API.
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 
 	"github.com/pauloedsg/pointpoker/internal/config"
@@ -15,90 +20,81 @@ import (
 	"github.com/pauloedsg/pointpoker/internal/hub"
 	"github.com/pauloedsg/pointpoker/internal/repository"
 	"github.com/pauloedsg/pointpoker/internal/service"
+	"github.com/pauloedsg/pointpoker/migrations"
 )
 
+const shutdownTimeout = 10 * time.Second
+
 func main() {
-	cfg := config.Load()
-
-	// Connect to database
-	db, err := sql.Open("postgres", cfg.DSN())
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		log.Fatalf("Failed to ping database: %v", err)
-	}
-	log.Println("Connected to database")
-
-	// Run migrations
-	if err := runMigrations(db); err != nil {
-		log.Fatalf("Failed to run migrations: %v", err)
-	}
-
-	// Repositories
-	roomRepo := repository.NewRoomRepository(db)
-	voteRepo := repository.NewVoteRepository(db)
-
-	// Services
-	roomService := service.NewRoomService(roomRepo)
-	votingService := service.NewVotingService(voteRepo, roomRepo)
-
-	// WebSocket Hub Manager
-	hubManager := hub.NewHubManager()
-
-	// Handlers
-	roomHandler := handler.NewRoomHandler(roomService, hubManager)
-	voteHandler := handler.NewVoteHandler(votingService, roomService, hubManager)
-	wsHandler := handler.NewWSHandler(roomService, hubManager)
-
-	// Gin Router
-	r := gin.Default()
-
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "X-Session-Token"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-	}))
-
-	// API routes
-	api := r.Group("/api")
-	{
-		rooms := api.Group("/rooms")
-		{
-			rooms.POST("", roomHandler.CreateRoom)
-			rooms.GET("/:code", roomHandler.GetRoom)
-			rooms.POST("/:code/join", roomHandler.JoinRoom)
-			rooms.POST("/:code/rounds", voteHandler.StartRound)
-			rooms.GET("/:code/rounds/current", voteHandler.GetRoundState)
-			rooms.POST("/:code/rounds/:roundId/vote", voteHandler.CastVote)
-			rooms.POST("/:code/rounds/:roundId/reveal", voteHandler.RevealVotes)
-			rooms.POST("/:code/rounds/:roundId/reset", voteHandler.ResetRound)
-			rooms.GET("/:code/ws", wsHandler.HandleWebSocket)
-		}
-	}
-
-	port := cfg.ServerPort
-	log.Printf("Server starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
 }
 
-func runMigrations(db *sql.DB) error {
-	migration, err := os.ReadFile("migrations/001_init.sql")
-	if err != nil {
-		return fmt.Errorf("read migration file: %w", err)
-	}
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	_, err = db.Exec(string(migration))
-	if err != nil {
-		return fmt.Errorf("execute migration: %w", err)
-	}
+	cfg := config.Load()
 
+	db, err := sql.Open("postgres", cfg.DSN())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping database: %w", err)
+	}
+	log.Println("Connected to database")
+
+	if err := migrations.Apply(ctx, db); err != nil {
+		return err
+	}
 	log.Println("Migrations completed successfully")
+
+	roomRepo := repository.NewRoomRepository(db)
+	voteRepo := repository.NewVoteRepository(db)
+	hubs := hub.NewHubManager()
+
+	router := handler.NewRouter(handler.Deps{
+		Rooms:       service.NewRoomService(roomRepo),
+		Voting:      service.NewVotingService(voteRepo, roomRepo),
+		Hubs:        hubs,
+		DB:          db,
+		CORSOrigins: cfg.CORSOrigins,
+	})
+
+	srv := &http.Server{
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("Server starting on port %s", cfg.ServerPort)
+		errCh <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+	}
+
+	log.Println("Shutting down...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	// WebSocket connections are hijacked and not tracked by Shutdown, so
+	// close them explicitly.
+	hubs.Close()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	log.Println("Server stopped")
 	return nil
 }
