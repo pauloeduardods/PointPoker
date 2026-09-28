@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-#MISE description="Run SQL migrations against the database"
+#MISE description="Apply SQL migrations manually (the backend also applies them on startup)"
 set -euo pipefail
 
-PGPASSWORD="${DB_PASSWORD:-pointpoker}" psql \
-  -h "${DB_HOST:-localhost}" \
-  -p "${DB_PORT:-5432}" \
-  -U "${DB_USER:-pointpoker}" \
-  -d "${DB_NAME:-pointpoker}" \
-  -f backend/migrations/001_init.sql
+for f in backend/migrations/*.sql; do
+  echo "==> $f"
+  docker compose exec -T db psql -v ON_ERROR_STOP=1 \
+    -U "${DB_USER:-pointpoker}" -d "${DB_NAME:-pointpoker}" < "$f"
+done

@@ -5,6 +5,7 @@ import "time"
 // RoomStatus represents the current state of a room.
 type RoomStatus string
 
+// Room statuses.
 const (
 	RoomStatusWaiting  RoomStatus = "waiting"
 	RoomStatusVoting   RoomStatus = "voting"
@@ -21,11 +22,14 @@ type Room struct {
 }
 
 // Participant represents a user in a room.
+//
+// SessionToken is a secret credential and is never serialized; handlers
+// return it explicitly (top-level) only from the create and join endpoints.
 type Participant struct {
 	ID           string    `json:"id"`
 	RoomID       string    `json:"room_id"`
 	DisplayName  string    `json:"display_name"`
-	SessionToken string    `json:"session_token,omitempty"`
+	SessionToken string    `json:"-"`
 	IsHost       bool      `json:"is_host"`
 	JoinedAt     time.Time `json:"joined_at"`
 }

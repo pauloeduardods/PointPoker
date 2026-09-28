@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Open a psql shell in the database container"
+set -euo pipefail
+
+docker compose exec db psql -U "${DB_USER:-pointpoker}" -d "${DB_NAME:-pointpoker}"

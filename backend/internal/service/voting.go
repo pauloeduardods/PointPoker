@@ -1,126 +1,208 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/pauloedsg/pointpoker/internal/model"
 	"github.com/pauloedsg/pointpoker/internal/repository"
 )
 
-// VotingService contains business logic for voting operations.
+// VotingService contains business logic for rounds and votes.
 type VotingService struct {
-	voteRepo *repository.VoteRepository
-	roomRepo *repository.RoomRepository
+	rounds RoundStore
+	rooms  RoomStore
 }
 
 // NewVotingService creates a new VotingService.
-func NewVotingService(voteRepo *repository.VoteRepository, roomRepo *repository.RoomRepository) *VotingService {
-	return &VotingService{voteRepo: voteRepo, roomRepo: roomRepo}
+func NewVotingService(rounds RoundStore, rooms RoomStore) *VotingService {
+	return &VotingService{rounds: rounds, rooms: rooms}
 }
 
-// StartRound creates a new voting round and sets the room to voting status.
-func (s *VotingService) StartRound(roomID, storyTitle string) (*model.VotingRound, error) {
-	round := &model.VotingRound{
-		RoomID:     roomID,
-		StoryTitle: storyTitle,
-		Status:     model.RoundStatusVoting,
+// StartRound creates a new voting round, which becomes the room's current
+// round. Only the host may start a round.
+func (s *VotingService) StartRound(ctx context.Context, code, token, storyTitle string) (*model.VotingRound, error) {
+	room, _, err := s.authorizeHost(ctx, code, token, "start a round")
+	if err != nil {
+		return nil, err
 	}
-	if err := s.voteRepo.CreateRound(round); err != nil {
+	storyTitle, err = cleanText("story_title", storyTitle, MaxStoryTitleLen)
+	if err != nil {
+		return nil, err
+	}
+
+	round := &model.VotingRound{RoomID: room.ID, StoryTitle: storyTitle, Status: model.RoundStatusVoting}
+	if err := s.rounds.CreateRound(ctx, round); err != nil {
 		return nil, fmt.Errorf("create round: %w", err)
 	}
-	if err := s.roomRepo.UpdateStatus(roomID, model.RoomStatusVoting); err != nil {
+	if err := s.rooms.UpdateRoomStatus(ctx, room.ID, model.RoomStatusVoting); err != nil {
 		return nil, fmt.Errorf("update room status: %w", err)
 	}
 	return round, nil
 }
 
-// CastVote records a participant's vote, validating the value against the Fibonacci deck.
-func (s *VotingService) CastVote(roundID, participantID, value string) (*model.Vote, error) {
-	valid := false
-	for _, v := range model.FibonacciDeck {
-		if v == value {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return nil, fmt.Errorf("invalid vote value: %s", value)
-	}
-
-	round, err := s.voteRepo.GetRound(roundID)
+// CastVote records (or replaces) the caller's vote in a round that is still
+// open for voting.
+func (s *VotingService) CastVote(ctx context.Context, code, token, roundID, value string) (*model.Vote, error) {
+	room, p, err := authorize(ctx, s.rooms, code, token)
 	if err != nil {
-		return nil, fmt.Errorf("round not found: %w", err)
+		return nil, err
+	}
+	value = strings.TrimSpace(value)
+	if !model.IsValidVote(value) {
+		return nil, newError(ErrInvalid, "value must be one of %s", strings.Join(model.FibonacciDeck, ", "))
+	}
+	round, err := s.roundInRoom(ctx, room, roundID)
+	if err != nil {
+		return nil, err
 	}
 	if round.Status != model.RoundStatusVoting {
-		return nil, fmt.Errorf("round is not in voting status")
+		return nil, newError(ErrConflict, "round is not open for voting")
 	}
 
-	vote := &model.Vote{
-		RoundID:       roundID,
-		ParticipantID: participantID,
-		Value:         value,
-	}
-	if err := s.voteRepo.CastVote(vote); err != nil {
+	vote := &model.Vote{RoundID: round.ID, ParticipantID: p.ID, Value: value}
+	if err := s.rounds.UpsertVote(ctx, vote); err != nil {
 		return nil, fmt.Errorf("cast vote: %w", err)
 	}
 	return vote, nil
 }
 
-// RevealVotes marks the round as revealed and returns all votes.
-func (s *VotingService) RevealVotes(roundID string) ([]model.Vote, error) {
-	round, err := s.voteRepo.GetRound(roundID)
+// Reveal closes voting on a round and returns every vote with the voter's
+// display name. Only the host may reveal; revealing twice is a conflict.
+func (s *VotingService) Reveal(ctx context.Context, code, token, roundID string) ([]model.RevealedVote, error) {
+	room, _, err := s.authorizeHost(ctx, code, token, "reveal votes")
 	if err != nil {
-		return nil, fmt.Errorf("round not found: %w", err)
+		return nil, err
 	}
-	if round.Status != model.RoundStatusVoting {
-		return nil, fmt.Errorf("round is not in voting status")
+	round, err := s.roundInRoom(ctx, room, roundID)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := s.voteRepo.UpdateRoundStatus(roundID, model.RoundStatusRevealed); err != nil {
-		return nil, fmt.Errorf("update round status: %w", err)
+	ok, err := s.rounds.RevealRound(ctx, round.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reveal round: %w", err)
 	}
-	if err := s.roomRepo.UpdateStatus(round.RoomID, model.RoomStatusRevealed); err != nil {
+	if !ok {
+		return nil, newError(ErrConflict, "round is already revealed")
+	}
+	if err := s.rooms.UpdateRoomStatus(ctx, room.ID, model.RoomStatusRevealed); err != nil {
 		return nil, fmt.Errorf("update room status: %w", err)
 	}
 
-	return s.voteRepo.GetVotesByRound(roundID)
-}
-
-// ResetRound clears all votes and sets the round back to voting status.
-func (s *VotingService) ResetRound(roundID string) error {
-	round, err := s.voteRepo.GetRound(roundID)
+	votes, err := s.rounds.ListVotes(ctx, round.ID)
 	if err != nil {
-		return fmt.Errorf("round not found: %w", err)
+		return nil, fmt.Errorf("list votes: %w", err)
 	}
-
-	if err := s.voteRepo.DeleteVotesByRound(roundID); err != nil {
-		return fmt.Errorf("delete votes: %w", err)
+	participants, err := s.rooms.ListParticipants(ctx, room.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
 	}
-	if err := s.voteRepo.UpdateRoundStatus(roundID, model.RoundStatusVoting); err != nil {
-		return fmt.Errorf("update round status: %w", err)
+	names := make(map[string]string, len(participants))
+	for _, p := range participants {
+		names[p.ID] = p.DisplayName
 	}
-	if err := s.roomRepo.UpdateStatus(round.RoomID, model.RoomStatusVoting); err != nil {
-		return fmt.Errorf("update room status: %w", err)
+	results := make([]model.RevealedVote, 0, len(votes))
+	for _, v := range votes {
+		results = append(results, model.RevealedVote{
+			ParticipantID: v.ParticipantID,
+			DisplayName:   names[v.ParticipantID],
+			Value:         v.Value,
+		})
 	}
-	return nil
+	return results, nil
 }
 
-// GetVotesByRound returns all votes for a round.
-func (s *VotingService) GetVotesByRound(roundID string) ([]model.Vote, error) {
-	return s.voteRepo.GetVotesByRound(roundID)
+// Reset re-opens a round for a revote: all its votes are deleted and its
+// status goes back to voting. Only the host may reset.
+func (s *VotingService) Reset(ctx context.Context, code, token, roundID string) (*model.VotingRound, error) {
+	room, _, err := s.authorizeHost(ctx, code, token, "reset a round")
+	if err != nil {
+		return nil, err
+	}
+	round, err := s.roundInRoom(ctx, room, roundID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.rounds.ResetRound(ctx, round.ID); err != nil {
+		return nil, fmt.Errorf("reset round: %w", err)
+	}
+	if err := s.rooms.UpdateRoomStatus(ctx, room.ID, model.RoomStatusVoting); err != nil {
+		return nil, fmt.Errorf("update room status: %w", err)
+	}
+	round.Status = model.RoundStatusVoting
+	return round, nil
 }
 
-// GetRound retrieves a voting round by ID.
-func (s *VotingService) GetRound(roundID string) (*model.VotingRound, error) {
-	return s.voteRepo.GetRound(roundID)
+// CurrentRound returns the room's latest round (nil if none) and its votes.
+// The votes slice is never nil. While the round is voting, every vote value
+// is blanked except the one cast by the participant owning token (if token
+// is empty or does not identify a member of the room, all values are hidden).
+func (s *VotingService) CurrentRound(ctx context.Context, code, token string) (*model.VotingRound, []model.Vote, error) {
+	room, err := getRoom(ctx, s.rooms, code)
+	if err != nil {
+		return nil, nil, err
+	}
+	round, err := s.rounds.GetLatestRound(ctx, room.ID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, []model.Vote{}, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get latest round: %w", err)
+	}
+	votes, err := s.rounds.ListVotes(ctx, round.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list votes: %w", err)
+	}
+	if votes == nil {
+		votes = []model.Vote{}
+	}
+
+	if round.Status == model.RoundStatusVoting {
+		requesterID := ""
+		if token != "" {
+			// The token is optional here: an invalid or foreign token simply
+			// means the caller sees no values.
+			if p, err := participantByToken(ctx, s.rooms, token); err == nil && p.RoomID == room.ID {
+				requesterID = p.ID
+			}
+		}
+		for i := range votes {
+			if votes[i].ParticipantID != requesterID {
+				votes[i].Value = ""
+			}
+		}
+	}
+	return round, votes, nil
 }
 
-// GetActiveRound returns the current active round for a room.
-func (s *VotingService) GetActiveRound(roomID string) (*model.VotingRound, error) {
-	return s.voteRepo.GetActiveRound(roomID)
+func (s *VotingService) authorizeHost(ctx context.Context, code, token, action string) (*model.Room, *model.Participant, error) {
+	room, p, err := authorize(ctx, s.rooms, code, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !p.IsHost {
+		return nil, nil, newError(ErrForbidden, "only the host can %s", action)
+	}
+	return room, p, nil
 }
 
-// GetLatestRound returns the most recent round for a room.
-func (s *VotingService) GetLatestRound(roomID string) (*model.VotingRound, error) {
-	return s.voteRepo.GetLatestRound(roomID)
+// roundInRoom loads a round and checks that it belongs to room.
+func (s *VotingService) roundInRoom(ctx context.Context, room *model.Room, roundID string) (*model.VotingRound, error) {
+	notFound := newError(ErrNotFound, "round not found")
+	if !isUUID(roundID) {
+		return nil, notFound
+	}
+	round, err := s.rounds.GetRound(ctx, roundID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, notFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get round: %w", err)
+	}
+	if round.RoomID != room.ID {
+		return nil, notFound
+	}
+	return round, nil
 }

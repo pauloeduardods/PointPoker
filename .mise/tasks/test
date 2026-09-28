@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run all tests (backend + frontend)"
+#MISE depends=["backend:test", "frontend:test"]
+set -euo pipefail

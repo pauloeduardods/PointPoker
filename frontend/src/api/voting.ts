@@ -1,42 +1,51 @@
 import client from "./client";
+import type {
+  CurrentRoundResponse,
+  RevealedVote,
+  Round,
+  Vote,
+} from "./types";
 
-export interface VotingRound {
-  id: string;
-  room_id: string;
-  story_title: string;
-  status: "voting" | "revealed";
-  created_at: string;
-}
+export type { Round, Vote, RevealedVote } from "./types";
 
-export interface Vote {
-  id: string;
-  round_id: string;
-  participant_id: string;
-  value: string;
-  voted_at: string;
-}
-
-export const FIBONACCI_DECK = ["0", "1", "2", "3", "5", "8", "13", "21", "?"];
+const enc = (s: string) => encodeURIComponent(s);
+const roomPath = (code: string) => `/rooms/${enc(code.trim().toUpperCase())}`;
 
 export const votingAPI = {
-  startRound: (code: string, storyTitle: string) =>
-    client.post<{ round: VotingRound }>(`/rooms/${code}/rounds`, {
-      story_title: storyTitle,
-    }),
+  async startRound(code: string, storyTitle: string): Promise<Round> {
+    const { data } = await client.post<{ round: Round }>(
+      `${roomPath(code)}/rounds`,
+      { story_title: storyTitle },
+    );
+    return data.round;
+  },
 
-  getRoundState: (code: string) =>
-    client.get<{ round: VotingRound; votes: Vote[] }>(
-      `/rooms/${code}/rounds/current`,
-    ),
+  async getCurrentRound(code: string): Promise<CurrentRoundResponse> {
+    const { data } = await client.get<CurrentRoundResponse>(
+      `${roomPath(code)}/rounds/current`,
+    );
+    return { round: data.round ?? null, votes: data.votes ?? [] };
+  },
 
-  castVote: (code: string, roundId: string, value: string) =>
-    client.post(`/rooms/${code}/rounds/${roundId}/vote`, {
-      value,
-    }),
+  async castVote(code: string, roundId: string, value: string): Promise<Vote> {
+    const { data } = await client.post<{ vote: Vote }>(
+      `${roomPath(code)}/rounds/${enc(roundId)}/vote`,
+      { value },
+    );
+    return data.vote;
+  },
 
-  revealVotes: (code: string, roundId: string) =>
-    client.post(`/rooms/${code}/rounds/${roundId}/reveal`),
+  async reveal(code: string, roundId: string): Promise<RevealedVote[]> {
+    const { data } = await client.post<{ votes: RevealedVote[] }>(
+      `${roomPath(code)}/rounds/${enc(roundId)}/reveal`,
+    );
+    return data.votes ?? [];
+  },
 
-  resetRound: (code: string, roundId: string) =>
-    client.post(`/rooms/${code}/rounds/${roundId}/reset`),
+  async reset(code: string, roundId: string): Promise<Round> {
+    const { data } = await client.post<{ round: Round }>(
+      `${roomPath(code)}/rounds/${enc(roundId)}/reset`,
+    );
+    return data.round;
+  },
 };

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run browser end-to-end tests (starts backend + Vite; set E2E_BASE_URL to target a running stack)"
+#MISE depends=["db:start"]
+#MISE dir="e2e"
+set -euo pipefail
+
+[ -d node_modules ] || npm install
+npx playwright test "$@"

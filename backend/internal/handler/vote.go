@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,215 +9,98 @@ import (
 	"github.com/pauloedsg/pointpoker/internal/service"
 )
 
-// VoteHandler handles HTTP requests for voting operations.
+// VoteHandler handles HTTP requests for rounds and votes.
 type VoteHandler struct {
-	votingService *service.VotingService
-	roomService   *service.RoomService
-	hubManager    *hub.HubManager
-}
-
-// NewVoteHandler creates a new VoteHandler.
-func NewVoteHandler(votingService *service.VotingService, roomService *service.RoomService, hubManager *hub.HubManager) *VoteHandler {
-	return &VoteHandler{
-		votingService: votingService,
-		roomService:   roomService,
-		hubManager:    hubManager,
-	}
+	voting *service.VotingService
+	hubs   *hub.HubManager
 }
 
 // StartRoundRequest is the request body for starting a new round.
 type StartRoundRequest struct {
-	StoryTitle string `json:"story_title" binding:"required"`
+	StoryTitle string `json:"story_title"`
 }
 
 // CastVoteRequest is the request body for casting a vote.
 type CastVoteRequest struct {
-	Value string `json:"value" binding:"required"`
+	Value string `json:"value"`
 }
 
-// StartRound handles POST /api/rooms/:code/rounds
+// CurrentRoundResponse is returned by GET /rooms/:code/rounds/current.
+type CurrentRoundResponse struct {
+	Round *model.VotingRound `json:"round"`
+	Votes []model.Vote       `json:"votes"`
+}
+
+// StartRound handles POST /api/rooms/:code/rounds.
 func (h *VoteHandler) StartRound(c *gin.Context) {
-	code := c.Param("code")
-	token := c.GetHeader("X-Session-Token")
-
-	participant, err := h.roomService.GetParticipantByToken(token)
-	if err != nil || !participant.IsHost {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the host can start a round"})
-		return
-	}
-
-	room, err := h.roomService.GetRoom(code)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
-		return
-	}
-
+	code := roomCode(c)
 	var req StartRoundRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
-
-	round, err := h.votingService.StartRound(room.ID, req.StoryTitle)
+	round, err := h.voting.StartRound(c.Request.Context(), code, sessionToken(c), req.StoryTitle)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start round"})
+		writeError(c, err)
 		return
 	}
-
-	roomHub := h.hubManager.GetOrCreateHub(code)
-	roomHub.BroadcastMessage(hub.WSMessage{
-		Type: "round_started",
-		Payload: gin.H{
-			"round_id":    round.ID,
-			"story_title": round.StoryTitle,
-		},
-	})
-
+	h.hubs.Broadcast(code, hub.WSMessage{Type: hub.EventRoundStarted, Payload: gin.H{"round": round}})
 	c.JSON(http.StatusCreated, gin.H{"round": round})
 }
 
-// CastVote handles POST /api/rooms/:code/rounds/:roundId/vote
+// CastVote handles POST /api/rooms/:code/rounds/:roundId/vote.
 func (h *VoteHandler) CastVote(c *gin.Context) {
-	code := c.Param("code")
-	roundID := c.Param("roundId")
-	token := c.GetHeader("X-Session-Token")
-
-	participant, err := h.roomService.GetParticipantByToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
-		return
-	}
-
+	code := roomCode(c)
 	var req CastVoteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
-
-	vote, err := h.votingService.CastVote(roundID, participant.ID, req.Value)
+	vote, err := h.voting.CastVote(c.Request.Context(), code, sessionToken(c), c.Param("roundId"), req.Value)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeError(c, err)
 		return
 	}
-
-	roomHub := h.hubManager.GetOrCreateHub(code)
-	roomHub.BroadcastMessage(hub.WSMessage{
-		Type: "vote_cast",
-		Payload: gin.H{
-			"participant_id": participant.ID,
-			"display_name":   participant.DisplayName,
-			"has_voted":      true,
-		},
+	h.hubs.Broadcast(code, hub.WSMessage{
+		Type:    hub.EventVoteCast,
+		Payload: gin.H{"participant_id": vote.ParticipantID},
 	})
-
 	c.JSON(http.StatusOK, gin.H{"vote": vote})
 }
 
-// RevealVotes handles POST /api/rooms/:code/rounds/:roundId/reveal
-func (h *VoteHandler) RevealVotes(c *gin.Context) {
-	code := c.Param("code")
+// Reveal handles POST /api/rooms/:code/rounds/:roundId/reveal.
+func (h *VoteHandler) Reveal(c *gin.Context) {
+	code := roomCode(c)
 	roundID := c.Param("roundId")
-	token := c.GetHeader("X-Session-Token")
-
-	participant, err := h.roomService.GetParticipantByToken(token)
-	if err != nil || !participant.IsHost {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the host can reveal votes"})
-		return
-	}
-
-	votes, err := h.votingService.RevealVotes(roundID)
+	votes, err := h.voting.Reveal(c.Request.Context(), code, sessionToken(c), roundID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeError(c, err)
 		return
 	}
-
-	// Build results with display names
-	participants, _ := h.roomService.GetParticipants(participant.RoomID)
-	nameMap := make(map[string]string)
-	for _, p := range participants {
-		nameMap[p.ID] = p.DisplayName
-	}
-
-	results := make([]gin.H, 0, len(votes))
-	for _, v := range votes {
-		results = append(results, gin.H{
-			"participant_id": v.ParticipantID,
-			"display_name":   nameMap[v.ParticipantID],
-			"value":          v.Value,
-		})
-	}
-
-	roomHub := h.hubManager.GetOrCreateHub(code)
-	roomHub.BroadcastMessage(hub.WSMessage{
-		Type: "votes_revealed",
-		Payload: gin.H{
-			"round_id": roundID,
-			"votes":    results,
-		},
+	h.hubs.Broadcast(code, hub.WSMessage{
+		Type:    hub.EventVotesRevealed,
+		Payload: gin.H{"round_id": roundID, "votes": votes},
 	})
-
-	c.JSON(http.StatusOK, gin.H{"votes": results})
+	c.JSON(http.StatusOK, gin.H{"votes": votes})
 }
 
-// ResetRound handles POST /api/rooms/:code/rounds/:roundId/reset
-func (h *VoteHandler) ResetRound(c *gin.Context) {
-	code := c.Param("code")
-	roundID := c.Param("roundId")
-	token := c.GetHeader("X-Session-Token")
-
-	participant, err := h.roomService.GetParticipantByToken(token)
-	if err != nil || !participant.IsHost {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the host can reset a round"})
+// Reset handles POST /api/rooms/:code/rounds/:roundId/reset.
+func (h *VoteHandler) Reset(c *gin.Context) {
+	code := roomCode(c)
+	round, err := h.voting.Reset(c.Request.Context(), code, sessionToken(c), c.Param("roundId"))
+	if err != nil {
+		writeError(c, err)
 		return
 	}
-
-	if err := h.votingService.ResetRound(roundID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	roomHub := h.hubManager.GetOrCreateHub(code)
-	roomHub.BroadcastMessage(hub.WSMessage{
-		Type: "round_reset",
-		Payload: gin.H{
-			"round_id": roundID,
-		},
-	})
-
-	c.JSON(http.StatusOK, gin.H{"message": "round reset"})
+	h.hubs.Broadcast(code, hub.WSMessage{Type: hub.EventRoundReset, Payload: gin.H{"round": round}})
+	c.JSON(http.StatusOK, gin.H{"round": round})
 }
 
-// GetRoundState handles GET /api/rooms/:code/rounds/current
-func (h *VoteHandler) GetRoundState(c *gin.Context) {
-	code := c.Param("code")
-
-	room, err := h.roomService.GetRoom(code)
+// CurrentRound handles GET /api/rooms/:code/rounds/current. The session
+// token is optional and only used to reveal the caller's own vote.
+func (h *VoteHandler) CurrentRound(c *gin.Context) {
+	round, votes, err := h.voting.CurrentRound(c.Request.Context(), roomCode(c), sessionToken(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+		writeError(c, err)
 		return
 	}
-
-	round, err := h.votingService.GetLatestRound(room.ID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			c.JSON(http.StatusOK, gin.H{"round": nil, "votes": []model.Vote{}})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get round"})
-		return
-	}
-
-	votes, _ := h.votingService.GetVotesByRound(round.ID)
-
-	// If round is not revealed, hide vote values
-	if round.Status == model.RoundStatusVoting {
-		for i := range votes {
-			votes[i].Value = ""
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"round": round,
-		"votes": votes,
-	})
+	c.JSON(http.StatusOK, CurrentRoundResponse{Round: round, Votes: votes})
 }

@@ -1,49 +1,44 @@
 import client from "./client";
+import type {
+  Participant,
+  RoomDetailsResponse,
+  SessionResponse,
+} from "./types";
 
-export interface Room {
-  id: string;
-  code: string;
-  name: string;
-  status: "waiting" | "voting" | "revealed";
-  created_at: string;
-}
+export type { Room, Participant } from "./types";
 
-export interface Participant {
-  id: string;
-  room_id: string;
-  display_name: string;
-  is_host: boolean;
-  joined_at: string;
-}
-
-export interface CreateRoomResponse {
-  room: Room;
-  session_token: string;
-  participant: Participant;
-}
-
-export interface JoinRoomResponse {
-  room: Room;
-  session_token: string;
-  participant: Participant;
-}
-
-export interface GetRoomResponse {
-  room: Room;
-  participants: Participant[];
-}
+const enc = (code: string) => encodeURIComponent(code.trim().toUpperCase());
 
 export const roomAPI = {
-  createRoom: (name: string, displayName: string) =>
-    client.post<CreateRoomResponse>("/rooms", {
+  async createRoom(name: string, displayName: string): Promise<SessionResponse> {
+    const { data } = await client.post<SessionResponse>("/rooms", {
       name,
       display_name: displayName,
-    }),
+    });
+    return data;
+  },
 
-  getRoom: (code: string) => client.get<GetRoomResponse>(`/rooms/${code}`),
+  async getRoom(code: string): Promise<RoomDetailsResponse> {
+    const { data } = await client.get<RoomDetailsResponse>(`/rooms/${enc(code)}`);
+    return data;
+  },
 
-  joinRoom: (code: string, displayName: string) =>
-    client.post<JoinRoomResponse>(`/rooms/${code}/join`, {
-      display_name: displayName,
-    }),
+  async joinRoom(code: string, displayName: string): Promise<SessionResponse> {
+    const { data } = await client.post<SessionResponse>(
+      `/rooms/${enc(code)}/join`,
+      { display_name: displayName },
+    );
+    return data;
+  },
+
+  async getMe(code: string): Promise<Participant> {
+    const { data } = await client.get<{ participant: Participant }>(
+      `/rooms/${enc(code)}/me`,
+    );
+    return data.participant;
+  },
+
+  async leaveRoom(code: string): Promise<void> {
+    await client.delete(`/rooms/${enc(code)}/participants/me`);
+  },
 };

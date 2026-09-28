@@ -13,60 +13,34 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
-	},
+	// Any origin is accepted: authentication relies on the session token in
+	// the query string, which is not an ambient credential a foreign page
+	// could replay (unlike cookies), so cross-site WebSocket hijacking does
+	// not apply. This also keeps dev proxies that rewrite Host working.
+	CheckOrigin: func(*http.Request) bool { return true },
 }
 
 // WSHandler handles WebSocket upgrade requests.
 type WSHandler struct {
-	roomService *service.RoomService
-	hubManager  *hub.HubManager
+	rooms *service.RoomService
+	hubs  *hub.HubManager
 }
 
-// NewWSHandler creates a new WSHandler.
-func NewWSHandler(roomService *service.RoomService, hubManager *hub.HubManager) *WSHandler {
-	return &WSHandler{
-		roomService: roomService,
-		hubManager:  hubManager,
-	}
-}
-
-// HandleWebSocket handles GET /api/rooms/:code/ws?token=<session_token>
-func (h *WSHandler) HandleWebSocket(c *gin.Context) {
-	code := c.Param("code")
-	token := c.Query("token")
-
-	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing session token"})
-		return
-	}
-
-	participant, err := h.roomService.GetParticipantByToken(token)
+// Serve handles GET /api/rooms/:code/ws?token=<session_token>. The
+// participant must belong to the room; the handler blocks for the lifetime
+// of the connection.
+func (h *WSHandler) Serve(c *gin.Context) {
+	code := roomCode(c)
+	_, p, err := h.rooms.Authorize(c.Request.Context(), code, c.Query("token"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid session token"})
+		writeError(c, err)
 		return
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
+		log.Printf("websocket upgrade: %v", err) // upgrader already wrote the HTTP error
 		return
 	}
-
-	roomHub := h.hubManager.GetOrCreateHub(code)
-	client := hub.NewClient(roomHub, conn, participant.ID, participant.DisplayName)
-
-	roomHub.Register(client)
-
-	go client.WritePump()
-	go client.ReadPump(func(participantID, displayName string) {
-		roomHub.BroadcastMessage(hub.WSMessage{
-			Type: "user_left",
-			Payload: gin.H{
-				"participant_id": participantID,
-				"display_name":   displayName,
-			},
-		})
-	})
+	hub.NewClient(conn, code, p.ID).Serve(h.hubs)
 }
