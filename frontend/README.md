@@ -1,5 +1,14 @@
-# Vue 3 + TypeScript + Vite
+# Point Poker — frontend
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + TypeScript + Vite + Pinia + Tailwind. Veja o [README da raiz](../README.md) para rodar o projeto inteiro.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+```bash
+npm run dev        # http://localhost:5173 (proxy de /api para localhost:$API_PORT, padrão 8080)
+npm test           # Vitest
+npm run lint       # vue-tsc
+npm run build
+```
+
+- `src/api/`: cliente REST (axios, `/api` relativo), tipos e `WebSocketManager` (reconexão com backoff).
+- `src/composables/useRoomSync.ts`: presença via WebSocket, refetch com debounce e polling só quando desconectado.
+- `src/stores/app.ts`: estado da sala. `src/utils/`: estatísticas, sessão e clipboard (funções puras e testadas).
